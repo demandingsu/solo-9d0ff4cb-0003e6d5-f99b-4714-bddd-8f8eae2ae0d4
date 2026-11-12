@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     environment:
       DB_PATH: /data/procurement.db
+      SNAPSHOT_DIR: /data/snapshots
       FETCH_TIMEOUT: "10"
       FETCH_RETRIES: "2"
       KEEP_LAST_ON_DETAIL_FAILURE: "true"

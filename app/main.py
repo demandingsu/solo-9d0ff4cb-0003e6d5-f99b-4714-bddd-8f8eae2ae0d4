@@ -7,17 +7,23 @@ POST /api/v1/sync                  同步指定列表页及其详情页
 GET  /api/v1/chains                查询全部引用链与孤立异常公告
 GET  /api/v1/announcements/{no}    查询单条公告
 GET  /api/v1/sync-runs             查询同步执行记录
+POST /api/v1/blacklist/verify      禁入名单核验（分页目录 + 决定详情）
+GET  /api/v1/blacklist/snapshot    查询某目录最近一次完整批次快照
 """
 from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
+from datetime import date
 
 from fastapi import FastAPI, HTTPException
 
-from . import db, service
+from . import blacklist_service, db, service, snapshot
 from .models import (
     AnnouncementItem,
+    BlacklistSnapshotResponse,
+    BlacklistVerifyRequest,
+    BlacklistVerifyResponse,
     Chain,
     OrphanAnnouncement,
     QueryResponse,
@@ -155,3 +161,36 @@ def list_sync_runs(limit: int = 20) -> dict:
     ).fetchall()
     conn.close()
     return {"runs": [dict(r) for r in rows]}
+
+
+@app.post("/api/v1/blacklist/verify", response_model=BlacklistVerifyResponse)
+def verify_blacklist(payload: BlacklistVerifyRequest) -> dict:
+    if not payload.index_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="index_url 必须是 http(s) URL")
+    try:
+        date.fromisoformat(payload.verify_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="verify_date 格式应为 YYYY-MM-DD"
+        )
+    return blacklist_service.verify(
+        payload.index_url, payload.subject_code, payload.verify_date
+    )
+
+
+@app.get("/api/v1/blacklist/snapshot", response_model=BlacklistSnapshotResponse)
+def get_blacklist_snapshot(index_url: str) -> dict:
+    if not index_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="index_url 必须是 http(s) URL")
+    data = snapshot.load_snapshot(index_url)
+    if data is None:
+        return {"index_url": index_url, "exists": False, "decisions": []}
+    return {
+        "index_url": index_url,
+        "exists": True,
+        "batch": data.get("batch"),
+        "page_count": data.get("page_count"),
+        "decision_count": data.get("decision_count"),
+        "captured_at": data.get("captured_at"),
+        "decisions": data.get("decisions", []),
+    }
